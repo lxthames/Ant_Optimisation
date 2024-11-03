@@ -324,13 +324,13 @@ if uploaded_file is not None:
                   st.dataframe(distance_df)
                   optimizer.Plot(max_iterations)
                   # Save results to a CSV
-                  output_file = 'Ant-Optimisation-Results.csv'
+                  # output_file = 'Ant-Optimisation-Results.csv'
                   results_df = pd.DataFrame({
                       "Best Path": [best_paths],
                       "Best Distance": [best_distance]
                   })
-                  results_df.to_csv(output_file, index=False)
-                  st.write(f"Results saved to {output_file}.")
+                  # results_df.to_csv(output_file, index=False)
+                  # st.write(f"Results saved to {output_file}.")
               else:
                   st.error("Invalid best path indices generated.")
           except Exception as e:
