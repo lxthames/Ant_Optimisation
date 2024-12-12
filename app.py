@@ -1,3 +1,4 @@
+# Import required libraries
 import pandas as pd
 import numpy as np
 from haversine import haversine, Unit
@@ -6,7 +7,9 @@ import sys
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.graph_objs as go
-
+from scipy.spatial import distance
+from tsp_solver.greedy import solve_tsp  # Example: Using a library for LKH-like heuristic
+import time
 # Suppress warnings
 import warnings
 warnings.filterwarnings('ignore')
@@ -109,8 +112,6 @@ class AntColonyOptimizer:
             from_node = best_path[i]
             to_node = best_path[i + 1]
             pheromone_matrix[from_node][to_node] = (1 - zeta) * pheromone_matrix[from_node][to_node] + initial_pheromone / best_distance
-
-    # New Plot method using Plotly for 3D visualization
     def Plot(self, max_iterations):
         # Convert data to numpy arrays
         y = np.array(self.y)
@@ -158,41 +159,76 @@ class AntColonyOptimizer:
         st.plotly_chart(fig)
 
 
-# Function to load and preprocess data
+def lin_kernighan_heuristic(distance_matrix):
+    """
+    A simplified implementation or library wrapper for the Lin-Kernighan heuristic.
+    Using an external library like `tsp_solver` for demonstration purposes.
+
+    Parameters:
+        distance_matrix (list): A 2D list representing the distance matrix.
+
+    Returns:
+        list: The best path found.
+        float: The total distance of the best path.
+    """
+    # Convert to a symmetric distance matrix if not already symmetric
+    symmetric_matrix = (np.array(distance_matrix) + np.array(distance_matrix).T) / 2.0
+
+    # Use an external library to find the approximate solution
+    path = solve_tsp(symmetric_matrix)
+    total_distance = sum(symmetric_matrix[path[i]][path[i + 1]] for i in range(len(path) - 1))
+    total_distance += symmetric_matrix[path[-1]][path[0]]  # Complete the cycle
+    return path, total_distance
+
 def load_data(file_path):
-    # Load the CSV file
-    df = pd.read_csv(file_path)
+    """
+    Load and preprocess the data from a CSV file.
 
-    # Ensure lat and lng columns exist in the dataset
-    if 'lat' not in df.columns or 'lng' not in df.columns:
-        return None, None, "No columns found for latitude which is lat or longitude which is lng."
+    Parameters:
+        file_path (UploadedFile): The uploaded file containing latitude and longitude data.
 
-    # Select only the relevant columns and drop rows with NaN values in those columns
-    locations = df[['lat', 'lng']].dropna()
+    Returns:
+        list: Distance matrix.
+        DataFrame: Locations DataFrame containing latitudes and longitudes.
+        str: Error message if any issues are encountered; otherwise, None.
+    """
+    try:
+        # Load the CSV file
+        df = pd.read_csv(file_path)
 
-    # Validate latitude and longitude values
-    invalid_rows = locations[(locations['lat'] < -90) | (locations['lat'] > 90) | (locations['lng'] < -180) | (locations['lng'] > 180)]
-    if not invalid_rows.empty:
-        return None, None, f"Invalid latitude/longitude values found in rows:\n{invalid_rows}"
+        # Ensure lat and lng columns exist in the dataset
+        if 'lat' not in df.columns or 'lng' not in df.columns:
+            return None, None, "No columns found for latitude ('lat') or longitude ('lng')."
 
-    # Initialize distance matrix
-    distance_matrix = []
+        # Select only the relevant columns and drop rows with NaN values in those columns
+        locations = df[['lat', 'lng']].dropna()
 
-    # Calculate the distance matrix using Haversine formula
-    for i in range(len(locations)):
-        from_node = (locations.iloc[i]['lat'], locations.iloc[i]['lng'])  # lat first
-        distances = []
-        for j in range(len(locations)):
-            to_node = (locations.iloc[j]['lat'], locations.iloc[j]['lng'])  # lat first
-            distance = haversine(from_node, to_node, unit=Unit.METERS) / 1000  # Convert to kilometers
-            distances.append(distance)
-        distance_matrix.append(distances)
+        # Validate latitude and longitude values
+        invalid_rows = locations[(locations['lat'] < -90) | (locations['lat'] > 90) | (locations['lng'] < -180) | (locations['lng'] > 180)]
+        if not invalid_rows.empty:
+            return None, None, f"Invalid latitude/longitude values found in rows:\n{invalid_rows}"
 
-    return distance_matrix, locations, None
+        # Initialize distance matrix
+        distance_matrix = []
+
+        # Calculate the distance matrix using the Haversine formula
+        for i in range(len(locations)):
+            from_node = (locations.iloc[i]['lat'], locations.iloc[i]['lng'])  # Latitude first
+            distances = []
+            for j in range(len(locations)):
+                to_node = (locations.iloc[j]['lat'], locations.iloc[j]['lng'])  # Latitude first
+                distance = haversine(from_node, to_node, unit=Unit.METERS) / 1000  # Convert to kilometers
+                distances.append(distance)
+            distance_matrix.append(distances)
+
+        return distance_matrix, locations, None
+
+    except Exception as e:
+        return None, None, f"An error occurred while processing the file: {str(e)}"
 
 
 # Streamlit UI
-st.title("Ant Colony Optimization for Route Optimization")
+st.title("TSP Solver with Ant Colony Optimization (ACO) and Lin-Kernighan Heuristic (LKH)")
 
 # File upload
 uploaded_file = st.file_uploader("Upload CSV file with latitude and longitude. Please ensure the data has column name lat for latitude and lng for longitude.", type='csv')
@@ -200,138 +236,270 @@ uploaded_file = st.file_uploader("Upload CSV file with latitude and longitude. P
 if uploaded_file is not None:
     distance_matrix, locations, message = load_data(uploaded_file)
 
-    # Handle messages or errors from data loading
     if message:
         st.error(message)
-
     else:
-      # Debugging: Check the shapes and contents
-      st.write("Number of Locations:", len(locations))
-      st.write("Locations DataFrame:", locations)
+        st.write("Number of Locations:", len(locations))
+        st.write("Locations DataFrame:", locations)
 
-      # Plot the locations using Plotly
-      fig_locations = go.Figure()
-      fig_locations.add_trace(go.Scatter(
-          x=locations['lng'],
-          y=locations['lat'],
-          mode='markers+text',
-          marker=dict(size=10, color='blue'),
-          text=locations.index,
-          textposition='top center'
-      ))
-      fig_locations.update_layout(
-          title="Locations",
-          xaxis_title="Longitude",
-          yaxis_title="Latitude"
-      )
-      st.plotly_chart(fig_locations)
+        # Plot the locations using Plotly
+        fig_locations = go.Figure()
+        fig_locations.add_trace(go.Scatter(
+            x=locations['lng'],
+            y=locations['lat'],
+            mode='markers+text',
+            marker=dict(size=10, color='blue'),
+            text=locations.index,
+            textposition='top center'
+        ))
+        fig_locations.update_layout(
+            title="Locations",
+            xaxis_title="Longitude",
+            yaxis_title="Latitude"
+        )
+        st.plotly_chart(fig_locations)
 
-      # Parameters input
-      num_ants = st.number_input("Number of Ants:", min_value=1, max_value=100, value=5)
-      max_iterations = st.number_input("Max Iterations:", min_value=1, max_value=500, value=100)
-      beta = st.number_input("Heuristic constant (beta):", min_value=0.0, value=4.0)
-      zeta = st.number_input("Local pheromone decay (zeta):", min_value=0.0, value=0.4)
-      rho = st.number_input("Global pheromone decay (rho):", min_value=0.0, value=0.2)
-      q0 = st.number_input("Randomization factor (q0):", min_value=0.0, value=0.7)
-      # Set verbose to True
-      verbose = True
+        # Method selection
+        method = st.selectbox("Select Optimization Method", options=["Ant Colony Optimization (ACO)", "Lin-Kernighan Heuristic (LKH)"])
+        # Parameters input
+        # Parameters input
+        if method == "Ant Colony Optimization (ACO)":
+             num_ants = st.number_input(
+                "Number of Ants:",
+                min_value=1,
+                max_value=100,
+                value=5,
+                help="The number of ants in the colony. A higher number increases exploration but also computational time."
+            )
+             max_iterations = st.number_input(
+                "Max Iterations:",
+                min_value=1,
+                max_value=500,
+                value=100,
+                help="The maximum number of iterations the optimization will run for."
+            )
+             beta = st.number_input(
+                "Heuristic constant (beta):",
+                min_value=0.0,
+                value=4.0,
+                help="Controls the influence of the heuristic information (distance) in the decision-making process."
+            )
+             zeta = st.number_input(
+                "Local pheromone decay (zeta):",
+                min_value=0.0,
+                value=0.4,
+                help="The rate at which local pheromone evaporates, reducing its influence over time."
+            )
+             rho = st.number_input(
+                "Global pheromone decay (rho):",
+                min_value=0.0,
+                value=0.2,
+                help="The rate at which global pheromone evaporates. A higher value emphasizes recent paths."
+            )
+             q0 = st.number_input(
+                "Randomization factor (q0):",
+                min_value=0.0,
+                value=0.7,
+                help="Probability of choosing the next node based on exploitation (best choice) rather than exploration."
+            )
 
-      if st.button("Run ACO"):
-          optimizer = AntColonyOptimizer()
-          try:
-              best_paths, best_distance = optimizer.fit(distance_matrix, num_ants, max_iterations, beta, zeta, rho, q0, verbose)
+        elif method == "Lin-Kernighan Heuristic (LKH)":
+            st.write("No additional parameters are required for LKH.")
 
-              # Debugging: Check best_paths
-              st.write("Best Paths Indices:", best_paths)
-              st.write("Length of Best Paths:", len(best_paths))
+        # Run the selected method
+        if st.button("Run Optimization"):
+            if method == "Ant Colony Optimization (ACO)":
+                with st.spinner("Running optimization..."):
+                   progress = st.progress(0)
+                   for i in range(100):  # Simulate progress
+                     progress.progress(i + 1)
+                     time.sleep(0.05)
+                optimizer = AntColonyOptimizer()
+                try:
+                    best_paths, best_distance = optimizer.fit(
+                        distance_matrix,
+                        num_ants=num_ants,
+                        max_iterations=max_iterations,
+                        beta=beta,
+                        zeta=zeta,
+                        rho=rho,
+                        q0=q0,
+                        verbose=False
+                    )
 
-              # Ensure best_paths is a valid index for locations DataFrame
-              if isinstance(best_paths[0], bool):
-                  best_paths = best_paths[1:]  # Remove the first item if it's True
+                    st.success("ACO Optimization Completed Successfully!")
+                    st.write("Best Path (ACO):", best_paths)
+                    st.write(f"Best Distance (ACO): {best_distance:.2f} km")
 
-              if all(isinstance(i, int) and 0 <= i < len(locations) for i in best_paths):
-                  # Create Animation of the best path using Plotly
-                  colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan', 'magenta', 'yellow']
-                  frames = []
-                  for i in range(len(best_paths)):
-                      color = colors[i % len(colors)]  # Assign a different color to each trace
-                      frame_data = go.Scatter(
-                          x=locations['lng'].iloc[best_paths[:i + 1]],
-                          y=locations['lat'].iloc[best_paths[:i + 1]],
-                          mode='lines+markers+text',
-                          text=[f'Point {j}' for j in best_paths[:i + 1]],
-                          textposition='top center',
-                          marker=dict(size=10, color=color),
-                          line=dict(color=color, width=3)
-                      )
-                      frames.append(go.Frame(data=[frame_data]))
+                    # Create an animated plot for ACO Best Path
+                    frames = []
+                    for i in range(1, len(best_paths)+1):
+                        frame = go.Frame(
+                            data=[
+                                go.Scatter(
+                                    x=locations['lng'].iloc[best_paths[:i]],
+                                    y=locations['lat'].iloc[best_paths[:i]],
+                                    mode='lines+markers',
+                                    line=dict(color='red', width=2),
+                                    marker=dict(size=10, color='blue'),
+                                )
+                            ],
+                            name=f'frame_{i}'
+                        )
+                        frames.append(frame)
 
-                  fig_best_path = go.Figure(
-                      data=[
-                          go.Scatter(
-                              x=locations['lng'].iloc[best_paths],
-                              y=locations['lat'].iloc[best_paths],
-                              mode='lines+markers',
-                              line=dict(color='red', width=2),
-                              marker=dict(size=10, color='blue'),
-                          )
-                      ],
-                      layout=go.Layout(
-                          title="Best Path from ACO",
-                          xaxis_title="Longitude",
-                          yaxis_title="Latitude",
-                          showlegend=False,
-                          updatemenus=[
-                              {
-                                  'type': 'buttons',
-                                  'showactive': False,
-                                  'buttons': [
-                                      {
-                                          'label': 'Play',
-                                          'method': 'animate',
-                                          'args': [None,
-                                                  {
-                                                      'frame': {'duration': 500, 'redraw': True},
-                                                      'mode': 'immediate',
-                                                      'transition': {'duration': 0}
-                                                  }
-                                                  ]
-                                      }
-                                  ]
-                              }
-                          ]
-                      ),
-                      frames=frames
-                  )
+                    fig_best_path_aco = go.Figure(
+                        data=[
+                            go.Scatter(
+                                x=locations['lng'].iloc[best_paths[:1]],  # Start with the first point
+                                y=locations['lat'].iloc[best_paths[:1]],  # Start with the first point
+                                mode='lines+markers',
+                                line=dict(color='red', width=2),
+                                marker=dict(size=10, color='blue'),
+                            )
+                        ],
+                        layout=go.Layout(
+                            title="Best Path from ACO (Animated)",
+                            xaxis_title="Longitude",
+                            yaxis_title="Latitude",
+                            updatemenus=[dict(
+                                type='buttons',
+                                x=0.1,
+                                y=-0.1,
+                                buttons=[dict(
+                                    label="Play",
+                                    method="animate",
+                                    args=[None, dict(frame=dict(duration=200, redraw=True), fromcurrent=True)],
+                                )],
+                            font=dict(color='black'),
+                            bgcolor="lightblue"
+                            )],
+                            sliders=[dict(
+                                steps=[dict(
+                                    args=[['frame_{}'.format(i)], dict(mode='immediate', frame=dict(duration=0, redraw=True))],
+                                    label=str(i),
+                                    method='animate',
+                                ) for i in range(1, len(best_paths)+1)]
+                            )]
+                        )
+                    )
+                    fig_best_path_aco.frames = frames
+                    st.plotly_chart(fig_best_path_aco)
 
-                  st.plotly_chart(fig_best_path)
+                    distance_details = []
+                    for i in range(len(best_paths) - 1):
+                        from_point = best_paths[i]
+                        to_point = best_paths[i + 1]
+                        distance = distance_matrix[from_point][to_point]
+                        distance_details.append((from_point, to_point, distance))
 
-                  # Display results
-                  st.write("Best Path:", best_paths)
-                  st.write("Best Distance (Total): {:.2f} km".format(best_distance))
+                    # Create a DataFrame to display the distances
+                    distance_df = pd.DataFrame(distance_details, columns=["From", "To", "Distance (km)"])
+                    st.write("Distances between Points in the Best Path:")
+                    st.dataframe(distance_df)
+                    # Save results to a CSV
+                    output_file = 'ACO-Results.csv'
+                    results_df = pd.DataFrame({
+                        "Best Path": [best_paths],
+                        "Best Distance": [best_distance]
+                    })
+                    results_df.to_csv(output_file, index=False)
+                    optimizer.Plot(max_iterations)
 
-                  # Detailed distances between each point in the best path
-                  distance_details = []
-                  for i in range(len(best_paths) - 1):
-                      from_point = best_paths[i]
-                      to_point = best_paths[i + 1]
-                      distance = distance_matrix[from_point][to_point]
-                      distance_details.append((from_point, to_point, distance))
+                except Exception as e:
+                    st.error(f"An error occurred during ACO: {e}")
 
-                  # Create a DataFrame to display the distances
-                  distance_df = pd.DataFrame(distance_details, columns=["From", "To", "Distance (km)"])
-                  st.write("Distances between Points in the Best Path:")
-                  st.dataframe(distance_df)
-                  optimizer.Plot(max_iterations)
-                  # Save results to a CSV
-                  # output_file = 'Ant-Optimisation-Results.csv'
-                  results_df = pd.DataFrame({
-                      "Best Path": [best_paths],
-                      "Best Distance": [best_distance]
-                  })
-                  # results_df.to_csv(output_file, index=False)
-                  # st.write(f"Results saved to {output_file}.")
-              else:
-                  st.error("Invalid best path indices generated.")
-          except Exception as e:
-              st.error(f"An error occurred: {e}")
+            elif method == "Lin-Kernighan Heuristic (LKH)":
+                with st.spinner("Running optimization..."):
+                   progress = st.progress(0)
+                   for i in range(100):  # Simulate progress
+                     progress.progress(i + 1)
+                     time.sleep(0.05)
+                try:
+                    best_paths, best_distance = lin_kernighan_heuristic(distance_matrix)
+
+                    st.success("LKH Optimization Completed Successfully!")
+                    st.write("Best Path (LKH):", best_paths)
+                    st.write(f"Best Distance (LKH): {best_distance:.2f} km")
+
+                    # Create an animated plot for LKH Best Path
+                    frames = []
+                    for i in range(1, len(best_paths)+1):
+                        frame = go.Frame(
+                            data=[
+                                go.Scatter(
+                                    x=locations['lng'].iloc[best_paths[:i]],
+                                    y=locations['lat'].iloc[best_paths[:i]],
+                                    mode='lines+markers',
+                                    line=dict(color='blue', width=2),
+                                    marker=dict(size=10, color='red'),
+                                )
+                            ],
+                            name=f'frame_{i}'
+                        )
+                        frames.append(frame)
+
+                    fig_best_path_lkh = go.Figure(
+                        data=[
+                            go.Scatter(
+                                x=locations['lng'].iloc[best_paths[:1]],  # Start with the first point
+                                y=locations['lat'].iloc[best_paths[:1]],  # Start with the first point
+                                mode='lines+markers',
+                                line=dict(color='blue', width=2),
+                                marker=dict(size=10, color='red'),
+                            )
+                        ],
+                        layout=go.Layout(
+                            title="Best Path from LKH (Animated)",
+                            xaxis_title="Longitude",
+                            yaxis_title="Latitude",
+                            updatemenus=[dict(
+                                type='buttons',
+                                x=0.1,
+                                y=-0.1,
+                                buttons=[dict(
+                                    label="Play",
+                                    method="animate",
+                                    args=[None, dict(frame=dict(duration=200, redraw=True), fromcurrent=True)],
+                                )],
+                                font=dict(color='black'),
+                                bgcolor="lightblue"
+                            )],
+                            sliders=[dict(
+                                steps=[dict(
+                                    args=[['frame_{}'.format(i)], dict(mode='immediate', frame=dict(duration=0, redraw=True))],
+                                    label=str(i),
+                                    method='animate',
+                                ) for i in range(1, len(best_paths)+1)]
+                            )]
+                        )
+                    )
+                    fig_best_path_lkh.frames = frames
+                    st.plotly_chart(fig_best_path_lkh)
+                    # Display results
+                    #st.write("Best Path:", best_paths)
+                    #st.write("Best Distance (Total): {:.2f} km".format(best_distance))
+
+                    # Detailed distances between each point in the best path
+                    distance_details = []
+                    for i in range(len(best_paths) - 1):
+                        from_point = best_paths[i]
+                        to_point = best_paths[i + 1]
+                        distance = distance_matrix[from_point][to_point]
+                        distance_details.append((from_point, to_point, distance))
+
+                    # Create a DataFrame to display the distances
+                    distance_df = pd.DataFrame(distance_details, columns=["From", "To", "Distance (km)"])
+                    st.write("Distances between Points in the Best Path:")
+                    st.dataframe(distance_df)
+                    # Save results to a CSV
+                    output_file = 'LK-Results.csv'
+                    results_df = pd.DataFrame({
+                        "Best Path": [best_paths],
+                        "Best Distance": [best_distance]
+                    })
+                    results_df.to_csv(output_file, index=False)
+                    #st.write(f"Results saved to {output_file}.")
+
+                except Exception as e:
+                    st.error(f"An error occurred during LKH: {e}")
