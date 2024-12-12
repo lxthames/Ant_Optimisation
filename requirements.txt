@@ -3,4 +3,6 @@ numpy
 haversine
 streamlit
 plotly
+scipy
 tsp_solver
+
